@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { readFile, mkdir, writeFile, readdir } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, readdir, lstat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { loadConfig, resolveCompatSettings } from '../config.js';
 import { bootstrapKicadProject, markCreateOrigin } from '../kicad/bootstrap.js';
@@ -86,7 +86,7 @@ sha256: ${briefMeta.sha256}
 }
 
 /**
- * Returns true when a directory exists and contains at least one file
+ * Returns true when a directory exists and contains at least one nonempty regular file
  * matching the optional glob-style extension list (case-insensitive).
  * No extension list = any file.
  */
@@ -96,8 +96,15 @@ async function dirHasFiles(dirPath: string, exts?: string[]): Promise<boolean> {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       if (entry.isDirectory()) {
         if (await walk(path.join(dir, entry.name))) return true;
-      } else if (!exts || exts.some((e) => entry.name.toLowerCase().endsWith(e))) {
-        return true;
+      } else if (entry.isFile() && (!exts || exts.some((e) => entry.name.toLowerCase().endsWith(e)))) {
+        // An interrupted export can leave a zero-byte file; a name alone is
+        // not evidence that this stage produced an artifact.
+        try {
+          const artifact = await lstat(path.join(dir, entry.name));
+          if (artifact.isFile() && artifact.size > 0) return true;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        }
       }
     }
     return false;
