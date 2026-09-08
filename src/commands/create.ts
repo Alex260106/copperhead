@@ -393,9 +393,10 @@ function isManagedPath(f: string, config: CopperheadConfig): boolean {
  * Strictly gated: only when every dirty path is copperhead-managed, so a user's
  * unrelated working changes are never swept into a copperhead commit; if any
  * foreign path is dirty, leave the whole thing for the human and say so.
+ * Return false when work could not be protected; later stages must not run.
  */
-async function commitResumedStage(opts: CreateOptions, config: CopperheadConfig, stageName: string): Promise<void> {
-  if (!(await isDirty(opts.repoRoot))) return;
+async function commitResumedStage(opts: CreateOptions, config: CopperheadConfig, stageName: string): Promise<boolean> {
+  if (!(await isDirty(opts.repoRoot))) return true;
   const dirty = await changedFiles(opts.repoRoot, 'HEAD');
   const foreign = dirty.filter((f) => !isManagedPath(f, config));
   if (foreign.length) {
@@ -407,7 +408,7 @@ async function commitResumedStage(opts: CreateOptions, config: CopperheadConfig,
         'warn',
       ),
     );
-    return;
+    return false;
   }
   try {
     const sha = await commitAll(opts.repoRoot, `copperhead: resume — commit completed stage ${stageName}`);
@@ -418,8 +419,10 @@ async function commitResumedStage(opts: CreateOptions, config: CopperheadConfig,
         'ok',
       ),
     );
+    return true;
   } catch (e) {
     opts.log(stageLine(stageName, `could not commit resumed work (${(e as Error).message})`, 'err'));
+    return false;
   }
 }
 
@@ -803,7 +806,12 @@ export async function runCreate(opts: CreateOptions): Promise<{ ok: boolean; com
     }
     if (await stage.isComplete(opts.repoRoot, config.docs)) {
       opts.log(stageLine(stage.name, 'already complete (resuming past it)', 'ok'));
-      await commitResumedStage(opts, config, stage.name);
+      if (!(await commitResumedStage(opts, config, stage.name))) {
+        logResumePoint(opts, stage, i);
+        printCostTable(opts, stageCosts);
+        await writeRunReport(opts, stageCosts);
+        return { ok: false, completed };
+      }
       completed.push(stage.name);
       if (stage.name === 'spec-seed') {
         try {
