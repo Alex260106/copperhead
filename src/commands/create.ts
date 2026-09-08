@@ -308,6 +308,8 @@ export interface CreateOptions {
   briefPath: string;
   model: string;
   interactive?: boolean;
+  /** Test seam: provide a deterministic provider for each stage attempt. */
+  providerFactory?: (stage: string, attempt: number) => Provider;
   /** Forwarded to each stage's run (attended continue-on-exhaustion prompt). */
   onBudgetExhausted?: (stats: BudgetExhaustedStats) => Promise<number>;
   log: (s: string) => void;
@@ -895,6 +897,7 @@ export async function runCreate(opts: CreateOptions): Promise<{ ok: boolean; com
           : `${basePrompt}${dossierBlock}`,
         interactive: opts.interactive ?? false,
         allowDirty: true, // stages build on each other's uncommitted state within the pipeline
+        ...(opts.providerFactory ? { provider: opts.providerFactory(stage.name, attempt) } : {}),
         ...(stageTurns !== undefined ? { maxTurns: stageTurns } : {}),
         ...(opts.onBudgetExhausted ? { onBudgetExhausted: opts.onBudgetExhausted } : {}),
         log: opts.log,
